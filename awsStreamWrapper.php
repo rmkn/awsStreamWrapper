@@ -13,10 +13,10 @@
 awsコンテキストオプション
     accesskey string
     secretkey string
-    resion string
+    region string
         デフォルト us-east-1
     version int
-        3, 4
+        2, 3, 4
         デフォルト 4
     format string
         xml, json, array
@@ -107,16 +107,10 @@ class AwsStreamWrapper
             if (isset($opt['aws']['accesskey']) && isset($opt['aws']['secretkey'])) {
                 $awsapi = new AwsApi($opt['aws']['accesskey'], $opt['aws']['secretkey']);
                 if (isset($opt['aws']['version'])) {
-                    switch ($opt['aws']['version']) {
-                    case 3:
-                        $awsapi->setSignatureVersion(AwsApi::SIGNATURE_V3);
-                        break;
-                    case 4:
-                    default:
-                    }
+                    $awsapi->setSignatureVersion($opt['aws']['version']);
                 }
-                if (isset($opt['aws']['resion'])) {
-                    $awsapi->setRegion($opt['aws']['resion']);
+                if (isset($opt['aws']['region'])) {
+                    $awsapi->setRegion($opt['aws']['region']);
                 }
                 $this->buf = $awsapi->call($this->path, $opt);
                 if (isset($opt['aws']['format'])) {
@@ -149,6 +143,7 @@ class AwsStreamWrapper
 
 class AwsApi
 {
+    const SIGNATURE_V2 = 'V2';
     const SIGNATURE_V3 = 'V3';
     const SIGNATURE_V4 = 'V4';
 
@@ -180,7 +175,7 @@ class AwsApi
         $this->res             = null;
         $this->url             = null;
         $this->option          = null;
-        $this->headers         = null;
+        $this->headers         = array();
     }
 
     public function setRegion($region)
@@ -191,7 +186,12 @@ class AwsApi
 
     public function setSignatureVersion($version)
     {
-        $this->signatureVer = $version;
+        $def = array(
+            2 => self::SIGNATURE_V2,
+            3 => self::SIGNATURE_V3,
+            4 => self::SIGNATURE_V4,
+        );
+        $this->signatureVer = isset($def[$version]) ? $def[$version] : self::SIGNATURE_V4;
     }
 
     public function call($url, $option = array())
@@ -199,6 +199,9 @@ class AwsApi
         $this->url    = $url;
         $this->option = $option;
         switch ($this->signatureVer) {
+        case self::SIGNATURE_V2:
+            $this->setAuthHeaderV2();
+            break;
         case self::SIGNATURE_V3:        // route53.amazonaws.com/2012-12-12
             $this->setAuthHeaderV3();
             break;
@@ -206,11 +209,26 @@ class AwsApi
         default:
             $this->setAuthHeaderV4();
         }
-        $this->option['http']['header'] = implode("\r\n", $this->headers);
+        if (!empty($this->headers)) {
+            $this->option['http']['header'] = implode("\r\n", $this->headers);
+        }
         $this->option['http']['ignore_errors'] = true;
         $context = stream_context_create($this->option);
         $this->res = @file_get_contents($this->url, false, $context);
         return $this->res;
+    }
+
+    private function setAuthHeaderV2()
+    {
+        $url = parse_url($this->url);
+        $ss = implode("\n", array(
+            empty($this->option['method']) ? 'GET' : $this->option['method'],
+            $url['host'],
+            $url['path'],
+            $this->createCanonicalQueryString($url['query']),
+        ));
+        $signature = base64_encode(hash_hmac('sha256', $ss, $this->secretKey, true));
+        $this->url .= "&Signature=" . urlencode($signature);
     }
 
     private function setAuthHeaderV3()
