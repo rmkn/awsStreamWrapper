@@ -112,6 +112,9 @@ class AwsStreamWrapper
                 if (isset($opt['aws']['region'])) {
                     $awsapi->setRegion($opt['aws']['region']);
                 }
+                if (isset($opt['aws']['cloud'])) {
+                    $awsapi->setCloud($opt['aws']['cloud']);
+                }
                 $this->buf = $awsapi->call($this->path, $opt);
                 if (isset($opt['aws']['format'])) {
                     switch ($opt['aws']['format']) {
@@ -149,6 +152,8 @@ class AwsApi
 
     private $signatureVer = self::SIGNATURE_V4;
 
+    private $cloud = 'aws';
+
     private $accessKey;
     private $secretKey;
 
@@ -157,7 +162,7 @@ class AwsApi
     private $credentialScope;
     private $signedHeaders;
 
-    private $_requestDate;
+    private $requestDate;
     private $res;
     private $url;
     private $option;
@@ -176,6 +181,11 @@ class AwsApi
         $this->url             = null;
         $this->option          = null;
         $this->headers         = array();
+    }
+
+    public function setCloud($cloud)
+    {
+        $this->cloud = strtolower($cloud);
     }
 
     public function setRegion($region)
@@ -209,9 +219,19 @@ class AwsApi
         default:
             $this->setAuthHeaderV4();
         }
+
+        $method = isset($this->option['http']['method']) ? strtoupper($this->option['http']['method']) : 'GET';
+        switch ($method) {
+        case 'POST':
+        case 'PUT':
+            $this->headers[] = 'Content-Length: ' . strlen($this->option['http']['content']);
+            $this->headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=utf-8';
+        }
+
         if (!empty($this->headers)) {
             $this->option['http']['header'] = implode("\r\n", $this->headers);
         }
+
         $this->option['http']['ignore_errors'] = true;
         $context = stream_context_create($this->option);
         $this->res = @file_get_contents($this->url, false, $context);
@@ -237,21 +257,35 @@ class AwsApi
         $this->setRequestHeaders($fmt);
         $ss = gmdate($fmt, $this->requestDate);
         $signature = base64_encode(hash_hmac('sha256', $ss, $this->secretKey, true));
-        $auth = sprintf('X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=%s,Algorithm=HmacSHA256,Signature=%s',
+        $auth = sprintf('X-%s-Authorization: %s3-HTTPS %sAccessKeyId=%s,Algorithm=HmacSHA256,Signature=%s',
+            $this->getAuthHeaderStr(),
+            strtoupper($this->cloud),
+            strtoupper($this->cloud),
             $this->accessKey,
             $signature
         );
         $this->headers[] = $auth;
     }
 
+    private function getAuthHeaderStr()
+    {
+        switch ($this->cloud) {
+        case 'aws':
+            return 'Amzn';
+        defaulr:
+            return ucfirst($this->cloud);
+        }
+    }
+
     private function setAuthHeaderV4()
     {
-        $this->setRequestHeaders('c');
+        $this->setRequestHeaders('Ymd\THis\Z');
         $cr = $this->createCanonicalRequest();
         $ss = $this->createStringToSign($cr);
         $sg = $this->calclulateSignature();
         $signature = hash_hmac('sha256', $ss, $sg, false);
-        $auth = sprintf('Authorization: AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s',
+        $auth = sprintf('Authorization: %s4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s',
+            strtoupper($this->cloud),
             $this->accessKey,
             $this->credentialScope,
             $this->signedHeaders,
@@ -266,22 +300,29 @@ class AwsApi
         $_host = explode('.', $host);
         $this->service = $_host[0];
 
-        $this->requestDate = time();
         $this->headers = array();
         $h = isset($this->option['http']['header']) ? str_replace("\r", '', $this->option['http']['header']) : '';
         foreach (explode("\n", $h) as $line) {
             if (empty($line)) {
                 continue;
             }
-            if (stripos($line, 'date:') !== false) {
-                $this->requestDate = strtotime(substr($line, strpos($line, ':') + 1));
-            } else if (stripos($line, 'host:') === false) {
+            if (stripos($line, 'host:') === false) {
                 $this->headers[] = $line;
             }
         }
         $this->headers[] = "Host: {$host}";
-        $this->headers[] = 'x-amz-date: ' . gmdate($dateType);
+        $this->headers[] = sprintf('X-%s-Date: %s', $this->getDateHeaderStr(), gmdate($dateType, $this->requestDate));
         $this->option['http']['header'] = implode("\r\n", $this->headers);
+    }
+
+    private function getDateHeaderStr()
+    {
+        switch ($this->cloud) {
+        case 'aws':
+            return 'Amz';
+        defaulr:
+            return ucfirst($this->cloud);
+        }
     }
 
     /**
@@ -319,10 +360,11 @@ class AwsApi
 
     private function setCredentialScope()
     {
-        $this->credentialScope = sprintf('%s/%s/%s/aws4_request',
+        $this->credentialScope = sprintf('%s/%s/%s/%s4_request',
             gmdate('Ymd', $this->requestDate),
             $this->region,
-            $this->service
+            $this->service,
+            strtolower($this->cloud)
         );
     }
 
@@ -358,7 +400,7 @@ class AwsApi
     private function createStringToSign($s)
     {
         $res = array(
-            'AWS4-HMAC-SHA256',
+            strtoupper($this->cloud) . '4-HMAC-SHA256',
             gmdate('Ymd\THis\Z', $this->requestDate),
             $this->credentialScope,
             hash('sha256', $s, false),
@@ -373,10 +415,10 @@ class AwsApi
     private function calclulateSignature()
     {
         $kSecret  = $this->secretKey;
-        $kDate    = hash_hmac('sha256', gmdate('Ymd', $this->requestDate), "AWS4{$kSecret}", true);
+        $kDate    = hash_hmac('sha256', gmdate('Ymd', $this->requestDate), strtoupper($this->cloud) . "4{$kSecret}", true);
         $kRegion  = hash_hmac('sha256', $this->region,  $kDate, true);
         $kService = hash_hmac('sha256', $this->service, $kRegion, true);
-        $kSigning = hash_hmac('sha256', 'aws4_request',  $kService, true);
+        $kSigning = hash_hmac('sha256', strtolower($this->cloud) . '4_request',  $kService, true);
         return $kSigning;
     }
 
