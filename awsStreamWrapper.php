@@ -33,11 +33,6 @@ class AwsStreamWrapper
     private $buf;
     private $pt;
 
-    public function debug($s)
-    {
-        var_dump($s);
-    }
-
     /**
      * @return void
      */
@@ -168,6 +163,7 @@ class AwsApi
     private $option;
     private $headers;
 
+
     public function __construct($accessKey, $secretAccessKey)
     {
         $this->accessKey   = $accessKey;
@@ -191,7 +187,6 @@ class AwsApi
     public function setRegion($region)
     {
         $this->region = $region;
-        $this->setCredentialScope();
     }
 
     public function setSignatureVersion($version)
@@ -225,7 +220,7 @@ class AwsApi
         case 'POST':
         case 'PUT':
             $this->headers[] = 'Content-Length: ' . strlen($this->option['http']['content']);
-            $this->headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=utf-8';
+            $this->headers[] = 'Content-Type: application/x-www-form-urlencoded';
         }
 
         if (!empty($this->headers)) {
@@ -235,6 +230,7 @@ class AwsApi
         $this->option['http']['ignore_errors'] = true;
         $context = stream_context_create($this->option);
         $this->res = @file_get_contents($this->url, false, $context);
+//var_dump(__FUNCTION__, $this->url, $this->option, $http_response_header);
         return $this->res;
     }
 
@@ -272,7 +268,7 @@ class AwsApi
         switch ($this->cloud) {
         case 'aws':
             return 'Amzn';
-        defaulr:
+        default:
             return ucfirst($this->cloud);
         }
     }
@@ -313,6 +309,7 @@ class AwsApi
         $this->headers[] = "Host: {$host}";
         $this->headers[] = sprintf('X-%s-Date: %s', $this->getDateHeaderStr(), gmdate($dateType, $this->requestDate));
         $this->option['http']['header'] = implode("\r\n", $this->headers);
+//var_dump(__FUNCTION__, $this->option);
     }
 
     private function getDateHeaderStr()
@@ -320,7 +317,7 @@ class AwsApi
         switch ($this->cloud) {
         case 'aws':
             return 'Amz';
-        defaulr:
+        default:
             return ucfirst($this->cloud);
         }
     }
@@ -340,7 +337,7 @@ class AwsApi
         $option = array_merge(
             array(
                 'method' => 'GET',
-                'content' => '',
+                'content' => 'action=DescribeScripts',
             ),
             (array)$this->option['http']
         );
@@ -355,6 +352,7 @@ class AwsApi
             $this->signedHeaders,
             hash('sha256', $option['content'], false),
         );
+//var_dump(__FUNCTION__, implode("\n", $res), $option);
         return implode("\n", $res);
     }
 
@@ -366,12 +364,14 @@ class AwsApi
             $this->service,
             strtolower($this->cloud)
         );
+//var_dump(__FUNCTION__, $this->credentialScope);
     }
 
     private function createCanonicalQueryString($query)
     {
         $res = explode('&', $query);
         sort($res);
+//var_dump(__FUNCTION__, $res);
         return implode('&', $res);
     }
 
@@ -390,6 +390,7 @@ class AwsApi
         sort($sh);
 
         $this->signedHeaders = implode(';', $sh);
+//var_dump(__FUNCTION__, $res);
         return implode("\n", $res) . "\n";
     }
 
@@ -405,6 +406,7 @@ class AwsApi
             $this->credentialScope,
             hash('sha256', $s, false),
         );
+//var_dump(__FUNCTION__, implode("\n", $res));
         return implode("\n", $res);
     }
 
@@ -419,6 +421,7 @@ class AwsApi
         $kRegion  = hash_hmac('sha256', $this->region,  $kDate, true);
         $kService = hash_hmac('sha256', $this->service, $kRegion, true);
         $kSigning = hash_hmac('sha256', strtolower($this->cloud) . '4_request',  $kService, true);
+//var_dump(__FUNCTION__, strtoupper($this->cloud) . "4{$kSecret}", $this->region, $this->service, strtolower($this->cloud) . '4_request');
         return $kSigning;
     }
 
