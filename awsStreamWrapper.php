@@ -337,7 +337,7 @@ class AwsApi
         $option = array_merge(
             array(
                 'method' => 'GET',
-                'content' => 'action=DescribeScripts',
+                'content' => '',
             ),
             (array)$this->option['http']
         );
