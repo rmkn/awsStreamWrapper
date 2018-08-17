@@ -382,7 +382,8 @@ class AwsApi
         foreach ($this->headers as $line) {
             $h = explode(':', $line, 2);
             if (count($h) >= 2) {
-                $res[] = strtolower($h[0]) . ':' . trim($h[1]);
+                $v = preg_replace(array('/^\s*/', '/\s{2,}/', '/\s*$/'), array('', ' ', ''), $h[1]);
+                $res[] = strtolower($h[0]) . ':' . $v;
                 $sh[]  = strtolower($h[0]);
             }
         }
