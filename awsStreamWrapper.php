@@ -199,10 +199,38 @@ class AwsApi
         $this->signatureVer = isset($def[$version]) ? $def[$version] : self::SIGNATURE_V4;
     }
 
+    function headerToArray($option)
+    {
+        if (isset($option['http']['header'])) {
+            $header = array();
+            if (is_array($option['http']['header'])) {
+                foreach ($option['http']['header'] as $k => $v) {
+                    if (is_numeric($k)) {
+                        $b = explode(':', $v, 2);
+                        if (count($b) == 2) {
+                            $header[$b[0]] = trim($b[1]);
+                        }
+                    } else {
+                        $header[$k] = $v;
+                    }
+                }
+            } else {
+                foreach (explode("\n", $option['http']['header']) as $l) {
+                    $b = explode(':', $l, 2);
+                    if (count($b) == 2) {
+                        $header[$b[0]] = trim($b[1]);
+                    }
+                }
+            }
+            $option['http']['header'] = $header;
+        }
+        return $option;
+    }
+
     public function call($url, $option = array())
     {
         $this->url    = $url;
-        $this->option = $option;
+        $this->option = $this->headerToArray($option);
         switch ($this->signatureVer) {
         case self::SIGNATURE_V2:
             $this->setAuthHeaderV2();
@@ -219,12 +247,19 @@ class AwsApi
         switch ($method) {
         case 'POST':
         case 'PUT':
-            $this->headers[] = 'Content-Length: ' . strlen($this->option['http']['content']);
-            $this->headers[] = 'Content-Type: application/x-www-form-urlencoded';
+            $buf = array(
+                'Content-Length' => strlen($this->option['http']['content']),
+                'Content-Type'   => 'application/x-www-form-urlencoded',
+            );
+            $this->headers += $buf;
         }
 
         if (!empty($this->headers)) {
-            $this->option['http']['header'] = implode("\r\n", $this->headers);
+            $buf = array();
+            foreach ($this->headers as $k => $v) {
+                $buf[] = "{$k}: {$v}";
+            }
+            $this->option['http']['header'] = implode("\r\n", $buf);
         }
 
         $this->option['http']['ignore_errors'] = true;
@@ -253,14 +288,16 @@ class AwsApi
         $this->setRequestHeaders($fmt);
         $ss = gmdate($fmt, $this->requestDate);
         $signature = base64_encode(hash_hmac('sha256', $ss, $this->secretKey, true));
-        $auth = sprintf('X-%s-Authorization: %s3-HTTPS %sAccessKeyId=%s,Algorithm=HmacSHA256,Signature=%s',
-            $this->getAuthHeaderStr(),
+        $key = sprintf('X-%s-Authorization',
+            $this->getAuthHeaderStr()
+        );
+        $auth = sprintf('%s3-HTTPS %sAccessKeyId=%s,Algorithm=HmacSHA256,Signature=%s',
             strtoupper($this->cloud),
             strtoupper($this->cloud),
             $this->accessKey,
             $signature
         );
-        $this->headers[] = $auth;
+        $this->headers[$key] = $auth;
     }
 
     private function getAuthHeaderStr()
@@ -280,35 +317,34 @@ class AwsApi
         $ss = $this->createStringToSign($cr);
         $sg = $this->calclulateSignature();
         $signature = hash_hmac('sha256', $ss, $sg, false);
-        $auth = sprintf('Authorization: %s4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s',
+        $auth = sprintf('%s4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s',
             strtoupper($this->cloud),
             $this->accessKey,
             $this->credentialScope,
             $this->signedHeaders,
             $signature
         );
-        $this->headers[] = $auth;
+        $this->headers['Authorization'] = $auth;
     }
 
     private function setRequestHeaders($dateType = 'r')
     {
-        $host  = parse_url($this->url,  PHP_URL_HOST);
-        $_host = explode('.', $host);
-        $this->service = $_host[0];
+        $host = parse_url($this->url,  PHP_URL_HOST);
+        $buf  = explode('.', $host);
+        $this->service = $buf[0];
 
         $this->headers = array();
-        $h = isset($this->option['http']['header']) ? str_replace("\r", '', $this->option['http']['header']) : '';
-        foreach (explode("\n", $h) as $line) {
-            if (empty($line)) {
-                continue;
-            }
-            if (stripos($line, 'host:') === false) {
-                $this->headers[] = $line;
+        if (isset($this->option['http']['header'])) {
+            foreach ($this->option['http']['header'] as $k => $v) {
+                if (strcasecmp($k, 'host') !== 0) {
+                    $this->headers[$k] = $v;
+                }
             }
         }
-        $this->headers[] = "Host: {$host}";
-        $this->headers[] = sprintf('X-%s-Date: %s', $this->getDateHeaderStr(), gmdate($dateType, $this->requestDate));
-        $this->option['http']['header'] = implode("\r\n", $this->headers);
+        $this->headers['Host'] = $host;
+        $key = sprintf('X-%s-Date', $this->getDateHeaderStr());
+        $this->headers[$key] = gmdate($dateType, $this->requestDate);
+        $this->option['http']['header'] = $this->headers;
 //var_dump(__FUNCTION__, $this->option);
     }
 
@@ -379,13 +415,10 @@ class AwsApi
     {
         $res = array();
         $sh  = array();
-        foreach ($this->headers as $line) {
-            $h = explode(':', $line, 2);
-            if (count($h) >= 2) {
-                $v = preg_replace(array('/^\s*/', '/\s{2,}/', '/\s*$/'), array('', ' ', ''), $h[1]);
-                $res[] = strtolower($h[0]) . ':' . $v;
-                $sh[]  = strtolower($h[0]);
-            }
+        foreach ($this->headers as $k => $v) {
+            $vv = preg_replace(array('/^\s*/', '/\s{2,}/', '/\s*$/'), array('', ' ', ''), $v);
+            $res[] = strtolower($k) . ':' . $vv;
+            $sh[]  = strtolower($k);
         }
         sort($res);
         sort($sh);
