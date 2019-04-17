@@ -272,14 +272,18 @@ class AwsApi
     private function setAuthHeaderV2()
     {
         $url = parse_url($this->url);
+        $qs  = sprintf('AccessKeyId=%s&Timestamp=%s&SignatureVersion=2&SignatureMethod=HmacSHA256',
+                    $this->accessKey,
+                    urlencode(gmdate('Y-m-d\TH:i:s\Z', $this->requestDate))
+               );
         $ss = implode("\n", array(
             empty($this->option['method']) ? 'GET' : $this->option['method'],
             $url['host'],
             $url['path'],
-            $this->createCanonicalQueryString($url['query']),
+            $this->createCanonicalQueryString("{$url['query']}&{$qs}"),
         ));
         $signature = base64_encode(hash_hmac('sha256', $ss, $this->secretKey, true));
-        $this->url .= "&Signature=" . urlencode($signature);
+        $this->url .= "&{$qs}&Signature=" . urlencode($signature);
     }
 
     private function setAuthHeaderV3()
