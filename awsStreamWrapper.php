@@ -465,7 +465,7 @@ class AwsApi
 
     public function asSimpleXml()
     {
-        $sx = simplexml_load_string($this->res, 'SX');
+        $sx = @simplexml_load_string($this->res, 'SX');
         return $sx !== false ? $sx : false;
     }
 
