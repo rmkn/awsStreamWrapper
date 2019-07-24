@@ -265,25 +265,37 @@ class AwsApi
         $this->option['http']['ignore_errors'] = true;
         $context = stream_context_create($this->option);
         $this->res = @file_get_contents($this->url, false, $context);
-//var_dump(__FUNCTION__, $this->url, $this->option, $http_response_header);
+//var_dump(__FUNCTION__, $this->url, $this->option, $http_response_header, $this->res);
         return $this->res;
     }
 
     private function setAuthHeaderV2()
     {
         $url = parse_url($this->url);
+
+        $post = isset($this->option['http']['method']) && $this->option['http']['method'] === 'POST';
+
+        if ($post) {
+            $param = isset($this->option['http']['content']) ? $this->option['http']['content'] : '';
+        } else {
+            $param = isset($url['query']) ? $url['query'] : '';
+        }
         $qs  = sprintf('AccessKeyId=%s&Timestamp=%s&SignatureVersion=2&SignatureMethod=HmacSHA256',
                     $this->accessKey,
                     urlencode(gmdate('Y-m-d\TH:i:s\Z', $this->requestDate))
                );
         $ss = implode("\n", array(
-            empty($this->option['method']) ? 'GET' : $this->option['method'],
+            empty($this->option['http']['method']) ? 'GET' : $this->option['http']['method'],
             $url['host'],
             $url['path'],
-            $this->createCanonicalQueryString("{$url['query']}&{$qs}"),
+            $this->createCanonicalQueryString("{$param}&{$qs}"),
         ));
         $signature = base64_encode(hash_hmac('sha256', $ss, $this->secretKey, true));
-        $this->url .= "&{$qs}&Signature=" . urlencode($signature);
+        if ($post) {
+            $this->option['http']['content'] .= "&{$qs}&Signature=" . urlencode($signature);
+        } else {
+            $this->url .= "&{$qs}&Signature=" . urlencode($signature);
+        }
     }
 
     private function setAuthHeaderV3()
